@@ -4,7 +4,7 @@ MODE:       # "train" or "eval" or "submit", for the main.py script.
 
 # System config, like CPU/GPU
 NUM_CPU_PER_GPU:          # number of CPU per GPU
-NUM_WORKERS: 6
+NUM_WORKERS: 1
 DEVICE: cuda
 AVAILABLE_GPUS: 0,1,2,3,4,5,6,7
 
@@ -14,7 +14,7 @@ GIT_VERSION:              # you should input the git version here, if you are us
 # Datasets:
 DATASETS: [DanceTrack]    # for joint training, there may be multiple datasets, like: [CrowdHuman, MOT17]
 DATASET_SPLITS: [train]   # and corresponding splits, like: [train, val]
-DATA_ROOT: ./datasets/    # datasets root
+DATA_ROOT: ./data/datasets/    # datasets root
 # Sampling settings:
 SAMPLE_STEPS: [0]
 SAMPLE_LENGTHS: [40]
@@ -72,7 +72,7 @@ SEED: 42
 USE_DISTRIBUTED: False
 DETR_NUM_TRAIN_FRAMES: 4
 # Below two parameters are for memory optimized DETR training:
-DETR_CHECKPOINT_FRAMES: 5
+DETR_CHECKPOINT_FRAMES: 0
 SEQ_DECODER_CHECKPOINT: False
 # Training Augmentation:
 TRAJ_DROP_RATIO: 0.5
@@ -105,7 +105,6 @@ INFERENCE_SPLIT: val
 INFERENCE_CONFIG_PATH:          # mostly, you don't need to set this parameter. See submit_engine.py L34 for more details.
 INFERENCE_GROUP:
 INFERENCE_MAX_SIZE: 1333
-INFERENCE_ENSEMBLE: 0
 # Thresholds:
 ID_THRESH: 0.2
 DET_THRESH: 0.3

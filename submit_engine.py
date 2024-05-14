@@ -42,12 +42,15 @@ def submit(config: dict, logger: Logger):
         submit_outputs_dir = os.path.join(config["OUTPUTS_DIR"], config["MODE"], config["INFERENCE_GROUP"],
                                           config["INFERENCE_SPLIT"],
                                           f'{config["INFERENCE_MODEL"].split("/")[-1][:-4]}')
+    elif config["MANUAL_OUPUT_DIR"] is not None:
+        submit_outputs_dir = config["MANUAL_OUPUT_DIR"] 
     else:
         submit_outputs_dir = os.path.join(config["OUTPUTS_DIR"], config["MODE"], "default",
                                           config["INFERENCE_SPLIT"],
                                           f'{config["INFERENCE_MODEL"].split("/")[-1][:-4]}')
+    
 
-    # 需要调度整个 submit 流程
+    # Need to schedule the entire submit process
     submit_one_epoch(
         config=config,
         model=model,
@@ -75,21 +78,21 @@ def submit_one_epoch(config: dict, model: nn.Module,
     model.eval()
 
     all_seq_names = get_seq_names(data_root=config["DATA_ROOT"], dataset=dataset, data_split=data_split)
-    seq_names = [all_seq_names[_] for _ in range(len(all_seq_names))
-                 if _ % distributed_world_size() == distributed_rank()]
+    # seq_names = [all_seq_names[_] for _ in range(len(all_seq_names))
+    #              if _ % distributed_world_size() == distributed_rank()]
+    seq_names = ["/usr/users/vhassle/datasets/Wortschatzinsel/5k_subset_12_42.mkv"] #edited!!! now always just one automatic sequence no  matter what the real input would be
 
     if len(seq_names) > 0:
-        for seq in seq_names:
+        for seq in seq_names[0:1]:
             submit_one_seq(
                 model=model, dataset=dataset,
-                seq_dir=os.path.join(config["DATA_ROOT"], dataset, data_split, seq),
+                seq_dir= seq, #os.path.join(config["DATA_ROOT"], dataset, data_split, seq),
                 only_detr=only_detr, max_temporal_length=config["MAX_TEMPORAL_LENGTH"],
                 outputs_dir=outputs_dir,
                 det_thresh=config["DET_THRESH"],
                 newborn_thresh=config["DET_THRESH"] if "NEWBORN_THRESH" not in config else config["NEWBORN_THRESH"],
                 area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
                 image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
-                inference_ensemble=config["INFERENCE_ENSEMBLE"] if "INFERENCE_ENSEMBLE" in config else 0,
             )
     else:   # fake submit, will not write any outputs.
         submit_one_seq(
@@ -101,8 +104,7 @@ def submit_one_epoch(config: dict, model: nn.Module,
             newborn_thresh=config["DET_THRESH"] if "NEWBORN_THRESH" not in config else config["NEWBORN_THRESH"],
             area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
             image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
-            fake_submit=True,
-            inference_ensemble=config["INFERENCE_ENSEMBLE"] if "INFERENCE_ENSEMBLE" in config else 0,
+            fake_submit=True
         )
 
     if is_distributed():
@@ -118,11 +120,10 @@ def submit_one_seq(
             det_thresh: float = 0.5, newborn_thresh: float = 0.5, area_thresh: float = 100, id_thresh: float = 0.1,
             image_max_size: int = 1333,
             fake_submit: bool = False,
-            inference_ensemble: int = 0,
         ):
     os.makedirs(os.path.join(outputs_dir, "tracker"), exist_ok=True)
     seq_dataset = SeqDataset(seq_dir=seq_dir, dataset=dataset, width=image_max_size)
-    seq_dataloader = DataLoader(seq_dataset, batch_size=1, num_workers=4, shuffle=False)
+    seq_dataloader = DataLoader(seq_dataset, batch_size=1, num_workers=0, shuffle=False)
     # seq_name = seq_dir.split("/")[-1]
     seq_name = os.path.split(seq_dir)[-1]
     device = model.device
@@ -202,7 +203,6 @@ def submit_one_seq(
                     id_deque=id_deque,
                     id_thresh=id_thresh,
                     newborn_thresh=newborn_thresh,
-                    inference_ensemble=inference_ensemble,
                 )   # already update the trajectory history/ids_to_results/current_id/id_deque in this function
                 id_results = []
                 for _ in ids:
@@ -225,10 +225,10 @@ def submit_one_seq(
                 for obj_id, box in zip(id_results, box_results):
                     obj_id = int(obj_id.item())
                     x1, y1, x2, y2 = box.tolist()
-                    if dataset in ["DanceTrack", "MOT17", "SportsMOT", "MOT17_SPLIT", "MOT15", "MOT15_V2"]:
+                    if dataset in ["DanceTrack", "MOT17", "SportsMOT", "MOT17_SPLIT", "MOT15", "MOT15_V2","test", "Wortschatzinsel"]:
                         result_line = f"{i + 1}," \
                                       f"{obj_id}," \
-                                      f"{x1},{y1},{x2 - x1},{y2 - y1},1,-1,-1,-1\n"
+                                      f"{x1},{y1},{x2 - x1},{y2 - y1},1,-1,-1,-1\n" #hier format festgelegt
                     else:
                         raise NotImplementedError(f"Do not know the outputs format of dataset '{dataset}'.")
                     file.write(result_line)
@@ -240,7 +240,7 @@ def submit_one_seq(
 
 
 def get_seq_names(data_root: str, dataset: str, data_split: str):
-    if dataset in ["DanceTrack", "SportsMOT", "MOT17", "MOT17_SPLIT"]:
+    if dataset in ["DanceTrack", "SportsMOT", "MOT17", "MOT17_SPLIT","test", "Wortschatzinsel"]:
         dataset_dir = os.path.join(data_root, dataset, data_split)
         return sorted(os.listdir(dataset_dir))
     else:

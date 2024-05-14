@@ -2,3 +2,8 @@
 
 # PyCharm
 .idea/
+.pyc
+__pycache__/
+outputs/
+data/datasets
+models/ops
