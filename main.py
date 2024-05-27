@@ -108,6 +108,11 @@ def parse_option():
     parser.add_argument("--area-thresh", type=int)
     parser.add_argument("--detr-cls-loss-coef", type=float)
 
+    #self created
+    parser.add_argument("--manual-output-dir", type=str)
+    parser.add_argument("--seq-path", type=str)
+    parser.add_argument("--view", type=str)
+
     return parser.parse_args()
 
 

@@ -19,6 +19,7 @@ from log.logger import Logger
 from utils.utils import yaml_to_dict, is_distributed, distributed_rank, distributed_world_size
 from models import build_model
 from models.utils import load_checkpoint
+import glob
 
 
 def submit(config: dict, logger: Logger):
@@ -42,8 +43,8 @@ def submit(config: dict, logger: Logger):
         submit_outputs_dir = os.path.join(config["OUTPUTS_DIR"], config["MODE"], config["INFERENCE_GROUP"],
                                           config["INFERENCE_SPLIT"],
                                           f'{config["INFERENCE_MODEL"].split("/")[-1][:-4]}')
-    elif config["MANUAL_OUPUT_DIR"] is not None:
-        submit_outputs_dir = config["MANUAL_OUPUT_DIR"] 
+    elif config["MANUAL_OUTPUT_DIR"] is not None:
+        submit_outputs_dir = config["MANUAL_OUTPUT_DIR"] 
     else:
         submit_outputs_dir = os.path.join(config["OUTPUTS_DIR"], config["MODE"], "default",
                                           config["INFERENCE_SPLIT"],
@@ -80,7 +81,8 @@ def submit_one_epoch(config: dict, model: nn.Module,
     all_seq_names = get_seq_names(data_root=config["DATA_ROOT"], dataset=dataset, data_split=data_split)
     # seq_names = [all_seq_names[_] for _ in range(len(all_seq_names))
     #              if _ % distributed_world_size() == distributed_rank()]
-    seq_names = ["/usr/users/vhassle/datasets/Wortschatzinsel/5k_subset_12_42.mkv"] #edited!!! now always just one automatic sequence no  matter what the real input would be
+    seq_names = [config["SEQ_PATH"]]#edited!!! now always just one automatic sequence no  matter what the real input would be
+
 
     if len(seq_names) > 0:
         for seq in seq_names[0:1]:
@@ -104,7 +106,8 @@ def submit_one_epoch(config: dict, model: nn.Module,
             newborn_thresh=config["DET_THRESH"] if "NEWBORN_THRESH" not in config else config["NEWBORN_THRESH"],
             area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
             image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
-            fake_submit=True
+            fake_submit=True,
+            view= config["VIEW"]
         )
 
     if is_distributed():
@@ -120,9 +123,11 @@ def submit_one_seq(
             det_thresh: float = 0.5, newborn_thresh: float = 0.5, area_thresh: float = 100, id_thresh: float = 0.1,
             image_max_size: int = 1333,
             fake_submit: bool = False,
+            view: str = "no_specific_view",
         ):
     os.makedirs(os.path.join(outputs_dir, "tracker"), exist_ok=True)
-    seq_dataset = SeqDataset(seq_dir=seq_dir, dataset=dataset, width=image_max_size)
+    seq_dataset = SeqDataset(seq_dir=seq_dir, dataset=dataset, width=image_max_size, view = view)
+
     seq_dataloader = DataLoader(seq_dataset, batch_size=1, num_workers=0, shuffle=False)
     # seq_name = seq_dir.split("/")[-1]
     seq_name = os.path.split(seq_dir)[-1]
@@ -217,7 +222,9 @@ def submit_one_seq(
         # Output to tracker file:
         if fake_submit is False:
             # Write the outputs to the tracker file:
-            result_file_path = os.path.join(outputs_dir, "tracker", f"{seq_name}.txt")
+            outputs_dir = outputs_dir.strip()
+            os.makedirs(os.path.join(outputs_dir, "tracker"), exist_ok=True)
+            result_file_path = os.path.join(outputs_dir, "tracker", f"{seq_name}.txt").strip()
             with open(result_file_path, "a") as file:
                 assert len(id_results) == len(box_results), f"Boxes and IDs should in the same length, " \
                                                             f"but get len(IDs)={len(id_results)} and " \

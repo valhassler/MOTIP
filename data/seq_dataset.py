@@ -32,12 +32,13 @@ from torch.utils.data import Dataset
 
 
 class SeqDataset(Dataset):
-    def __init__(self, seq_dir: str, dataset: str, height: int = 800, width: int = 1333):
+    def __init__(self, seq_dir: str, dataset: str, height: int = 800, width: int = 1333, view: str = 'non_specifc_view'):
         """
         Args:
             seq_dir:
             dataset: DanceTrack or MOT17 or et al.
         """
+        print(f'Loading video from view: {view}')
         video_path = seq_dir
         self.vr = decord.VideoReader(video_path, ctx=decord.cpu(0)) 
         image_shape = self.vr[0].shape
@@ -46,7 +47,7 @@ class SeqDataset(Dataset):
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         self.length = len(self.vr)
-        return
+        self.view = view
     
     def split_frame(self, entire_image):
         top_view = entire_image[0:540, 62:892]           # Crop from top view
@@ -69,7 +70,16 @@ class SeqDataset(Dataset):
 
     def __getitem__(self, idx):
         frame = self.vr[idx].asnumpy()
-        image = self.split_frame(frame)[0] # Decision is made to just use the top view for now !!!! changeable with other indexing
+        if self.view in ['top', 'coming_in','going_out']: #when one wants to split here he has to work 
+            splits = self.split_frame(frame)
+            if self.view == 'top':
+                image = splits[0]
+            elif self.view == 'coming_in':
+                image = splits[1]
+            elif self.view == 'going_out':
+                image = splits[2]
+        else:
+            image = frame
         print(f'Processing frame {idx}', end='\r')
         return self.process_image(image=image)
 
