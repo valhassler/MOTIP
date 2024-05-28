@@ -78,14 +78,16 @@ def submit_one_epoch(config: dict, model: nn.Module,
                      outputs_dir: str, only_detr: bool = False):
     model.eval()
 
-    all_seq_names = get_seq_names(data_root=config["DATA_ROOT"], dataset=dataset, data_split=data_split)
+    # all_seq_names = get_seq_names(data_root=config["DATA_ROOT"], dataset=dataset, data_split=data_split)
     # seq_names = [all_seq_names[_] for _ in range(len(all_seq_names))
     #              if _ % distributed_world_size() == distributed_rank()]
-    seq_names = [config["SEQ_PATH"]]#edited!!! now always just one automatic sequence no  matter what the real input would be
+    #seq_names = [config["SEQ_PATH"]]#edited!!! now always just one automatic sequence no  matter what the real input would be
+    seq_names = glob.glob("/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/*/2024*.mp4")
+    print(len(seq_names))   
 
 
     if len(seq_names) > 0:
-        for seq in seq_names[0:1]:
+        for seq in seq_names[0:10]:
             submit_one_seq(
                 model=model, dataset=dataset,
                 seq_dir= seq, #os.path.join(config["DATA_ROOT"], dataset, data_split, seq),
@@ -96,20 +98,6 @@ def submit_one_epoch(config: dict, model: nn.Module,
                 area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
                 image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
             )
-    else:   # fake submit, will not write any outputs.
-        submit_one_seq(
-            model=model, dataset=dataset,
-            seq_dir=os.path.join(config["DATA_ROOT"], dataset, data_split, all_seq_names[0]),
-            only_detr=only_detr, max_temporal_length=config["MAX_TEMPORAL_LENGTH"],
-            outputs_dir=outputs_dir,
-            det_thresh=config["DET_THRESH"],
-            newborn_thresh=config["DET_THRESH"] if "NEWBORN_THRESH" not in config else config["NEWBORN_THRESH"],
-            area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
-            image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
-            fake_submit=True,
-            view= config["VIEW"]
-        )
-
     if is_distributed():
         torch.distributed.barrier()
 

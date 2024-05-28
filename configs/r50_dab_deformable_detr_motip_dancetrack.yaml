@@ -20,3 +20,8 @@ AUG_RANDOM_RESIZE: [800, 1000, 1200]
 AUG_RANDOM_CROP_MIN: 800
 AUG_RANDOM_CROP_MAX: 1200
 INFERENCE_MAX_SIZE: 1536
+s
+# extra argument :D
+MANUAL_OUTPUT_DIR: ""
+SEQ_PATH: "/usr/users/vhassle/datasets/Wortschatzinsel/5k_subset_12_42.mkv"
+VIEW: "no_specifc_view"

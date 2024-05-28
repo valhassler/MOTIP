@@ -13,7 +13,7 @@ import torchvision
 import dlib
 from eval_functions import estimate_age_gender_MiVolo, estimate_age_gender_FairFace
 from mivolo.predictor import Predictor
-
+os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH")
 
 
 
@@ -75,7 +75,9 @@ class VideoDataset(Dataset):
         - predictor:  Initilized model for the age and gender prediciton
         """
         annotations = self.load_annotations(annotation_path)
-        annotation_with_age_gender_path = os.path.basename(annotation_path).split(".")[0] + "_age_gender.txt"
+        age_gender_basepath = "/".join(os.path.dirname(annotation_path).split("/")[:-1]) + "/tracker_age_gender"
+        os.makedirs(age_gender_basepath, exist_ok=True)
+        annotation_with_age_gender_path = os.path.join(age_gender_basepath,os.path.basename(annotation_path).split(".")[0] + "_age_gender.txt")
         
         if view == 'top':
             width, height = 830, 540
@@ -115,10 +117,12 @@ class VideoDataset(Dataset):
             # Write the annotations to a file
             if idx == 0 and os.path.exists(annotation_with_age_gender_path):
                 os.remove(annotation_with_age_gender_path)
-            indices = [0, 1, 2, 3, 4, -2, -1]
-            content_to_write = ' '.join(str(frame_annotations[i]) for i in indices)
-            with open(annotation_with_age_gender_path, 'a') as file:
-                file.write(content_to_write + '\n')
+            if len(annotation_with_age_gender_path) > 0:
+                for annotation in frame_annotations:
+                    indices = [0, 1, 2, 3, 4, -2, -1]
+                    content_to_write = str(idx) + " " +' '.join(str(annotation[i]) for i in indices)
+                    with open(annotation_with_age_gender_path, 'a') as file:
+                        file.write(content_to_write + '\n')
         out.release()
 
     def __getitem__(self, idx):
@@ -130,13 +134,15 @@ class VideoDataset(Dataset):
         return self.length
 
 # Usage example
-video_path = "/usr/users/vhassle/datasets/Wortschatzinsel/raspi_wsi1_2024_05_19_000.mp4"
-#video_path = '/usr/users/vhassle/datasets/Wortschatzinsel/Neon/2024_05_19_14_16_59.mp4'
 
-#annotation_path = '/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/submit/default/r50_deformable_detr_motip_mot17/tracker/5k_subset_12_42.mkv.txt'
-annotation_path = "/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/tracker/raspi_wsi1_2024_05_19_000.mp4.txt"
-#annotation_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon/tracker/2024_05_19_14_16_59.mp4.txt'
-output_path = f'/usr/users/vhassle/{os.path.basename(annotation_path).split(".")[0]}_MiVOLO.mp4'
+
+
+
+video_name = "2024_05_04_10_57_26"
+video_path = f"/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/{video_name.replace('_','-')}/{video_name}.mp4"
+annotation_path = f"/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/tracker/{video_name}.mp4.txt"
+
+output_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/{os.path.basename(annotation_path).split(".")[0]}_MiVOLO.mp4'
 
 
 # estimate_age_gender_MiVolo

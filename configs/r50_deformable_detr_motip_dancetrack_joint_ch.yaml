@@ -24,3 +24,8 @@ SCHEDULER_MILESTONES: [10, ]
 # To avoid CUDA OOM:
 AUTO_MEMORY_OPTIMIZED_DETR_CRITERION: True
 DETR_CHECKPOINT_FRAMES: 2
+
+# extra argument :D
+MANUAL_OUTPUT_DIR: ""
+SEQ_PATH: "/usr/users/vhassle/datasets/Wortschatzinsel/5k_subset_12_42.mkv"
+VIEW: "no_specifc_view"
