@@ -27,3 +27,8 @@ LR_WARMUP_EPOCHS: 2
 
 NUM_ID_VOCABULARY: 200
 TRAINING_NUM_ID: 80
+
+# extra argument :D
+MANUAL_OUTPUT_DIR: ""
+SEQ_PATH: "/usr/users/vhassle/datasets/Wortschatzinsel/5k_subset_12_42.mkv"
+VIEW: "no_specifc_view"

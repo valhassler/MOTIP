@@ -5,6 +5,13 @@ import cv2
 import dlib
 
 MINIMAL_SIZE = 20000
+#helper 
+def crop_image(image, annotation):
+        annotation = [0 if x < 0 else int(x) for x in annotation]
+        x, y, w, h = int(annotation[1]), int(annotation[2]), int(annotation[3]), int(annotation[4])
+        cropped_image = image[y:y+h, x:x+w]
+        return cropped_image
+
 
 # FairFace
 def reverse_resized_rect(rect,resize_ratio):
@@ -56,11 +63,13 @@ def softmax_numpy(logits):
     exps = np.exp(logits - np.max(logits))  # Subtract max for numerical stability
     return exps / np.sum(exps)
 
-def estimate_age_gender_FairFace(img, annotations, specific_arguments):
+
+
+
+def estimate_age_gender_FairFace(image, annotations, specific_arguments):
     cnn_face_detector, sp, model_g_a, trans, device = specific_arguments
     for annotation in annotations:
-        x, y, w, h = int(annotation[1]), int(annotation[2]), int(annotation[3]), int(annotation[4])
-        cropped_image = img[y:y+h, x:x+w]
+        cropped_image = crop_image(image, annotation)
         if cropped_image.shape[0]*cropped_image.shape[1] < MINIMAL_SIZE: #20000 for going_out, 200 for top
             continue
         faces_image, rects = extract_faces(cropped_image, cnn_face_detector, sp)
@@ -112,8 +121,7 @@ def estimate_age_gender_FairFace(img, annotations, specific_arguments):
 def estimate_age_gender_MiVolo(image, annotations, specific_arguments):
     predictor = specific_arguments[0]
     for annotation in annotations:
-        x, y, w, h = int(annotation[1]), int(annotation[2]), int(annotation[3]), int(annotation[4])
-        cropped_image = image[y:y+h, x:x+w]
+        cropped_image = crop_image(image, annotation)
         if cropped_image.shape[0]*cropped_image.shape[1] < MINIMAL_SIZE: #20000 for going_out, 200 for top
             continue
 
@@ -124,3 +132,89 @@ def estimate_age_gender_MiVolo(image, annotations, specific_arguments):
         else:
             annotation.append(detected_objects.genders[0])  # Gender
             annotation.append(np.mean(detected_objects.ages))  # Age
+#AgeSelf
+import torchvision.transforms as transforms
+from PIL import Image
+import torch.nn as nn
+import torch
+class ResizeToMaxDim:
+    def __init__(self, max_size):
+        self.max_size = max_size
+    
+    def __call__(self, img):
+        # Get current size
+        h, w, _ = img.shape
+        if w > h:
+            new_w = self.max_size
+            new_h = int(h * (self.max_size / w))
+        else:
+            new_h = self.max_size
+            new_w = int(w * (self.max_size / h))
+        
+        # Resize image
+        resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        return resized_img
+    
+class PadToSquare:
+    def __init__(self, size, fill=0):
+        self.size = size
+        self.fill = fill
+    
+    def __call__(self, img):
+        h, w, _ = img.shape
+        pad_w = (self.size - w) // 2
+        pad_h = (self.size - h) // 2
+        
+        # Padding values for top, bottom, left, right
+        padding = [(pad_h, self.size - h - pad_h), (pad_w, self.size - w - pad_w), (0, 0)]
+        
+        # Pad image
+        padded_img = np.pad(img, padding, mode='constant', constant_values=self.fill)
+        return padded_img
+
+transform = transforms.Compose([
+            ResizeToMaxDim(448),
+            PadToSquare(448),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+
+def estimate_age_gender_AgeSelf(image, annotations, specific_arguments):
+    model = specific_arguments[0]
+    for annotation in annotations:
+        cropped_image = crop_image(image, annotation)
+        if cropped_image.shape[0]*cropped_image.shape[1] < MINIMAL_SIZE: #20000 for going_out, 200 for top
+            continue
+
+
+        # Define transformation
+        # transform = transforms.Compose([
+        #     transforms.Resize(448),
+        #     transforms.ToTensor(),
+        #     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        # ])
+        transform = transforms.Compose([
+                ResizeToMaxDim(448),
+                PadToSquare(448),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+        # Load and preprocess the image
+        input_image_before_cuda = transform(image)
+        input_image = input_image_before_cuda.unsqueeze(0).to('cuda')
+        # Make prediction
+        with torch.no_grad():
+            output = model(input_image)
+            #predicted_age = output
+            predicted_age_group = np.argmax(output.cpu().numpy())
+        age_group_mapping = {
+            0: '0-2',
+            1: '3-13',
+            2: '18-99',
+        }
+        predicted_age_group = age_group_mapping.get(predicted_age_group, 'Unknown')
+
+        annotation.append(None)  # Gender
+        annotation.append(predicted_age_group)  # Age

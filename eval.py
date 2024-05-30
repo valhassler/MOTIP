@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 import torchvision
 
 import dlib
-from eval_functions import estimate_age_gender_MiVolo, estimate_age_gender_FairFace
+from eval_functions import estimate_age_gender_MiVolo, estimate_age_gender_FairFace, estimate_age_gender_AgeSelf
 from mivolo.predictor import Predictor
 os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH")
 
@@ -113,7 +113,8 @@ class VideoDataset(Dataset):
                 age_gender_est_func(selected_view, frame_annotations, predictor_age_gender)
             annotated_frame = self.draw_annotations(selected_view, frame_annotations, idx)
             out.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
-           
+            if age_gender_estimation is not True:
+                continue
             # Write the annotations to a file
             if idx == 0 and os.path.exists(annotation_with_age_gender_path):
                 os.remove(annotation_with_age_gender_path)
@@ -128,7 +129,7 @@ class VideoDataset(Dataset):
     def __getitem__(self, idx):
         frame = self.vr[idx].asnumpy()
         top_view, coming_in_view, going_out_view = self.split_frame(frame)
-        return top_view, coming_in_view, going_out_view
+        return top_view, coming_in_view, going_out_view, frame
 
     def __len__(self):
         return self.length
@@ -138,30 +139,47 @@ class VideoDataset(Dataset):
 
 
 
-video_name = "2024_05_04_10_57_26"
+#video_name = "2024_05_04_10_57_26"
+video_name = "2024_05_19_10_51_24"
+
 video_path = f"/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/{video_name.replace('_','-')}/{video_name}.mp4"
 annotation_path = f"/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/tracker/{video_name}.mp4.txt"
 
-output_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/{os.path.basename(annotation_path).split(".")[0]}_MiVOLO.mp4'
+output_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/{os.path.basename(annotation_path).split(".")[0]}_AgeSelf_pad.mp4'#_MiVOLO.mp4'
 
 
 # estimate_age_gender_MiVolo
 # Initialize Predictor
-class Args:
-    def __init__(self):
-        self.detector_weights = "/usr/users/vhassle/psych_track/MiVOLO/models/yolov8x_person_face.pt"
-        self.checkpoint = "/usr/users/vhassle/psych_track/MiVOLO/models/mivolo_imbd.pth.tar"
-        self.with_persons = True
-        self.disable_faces = False
-        self.draw = False
-        self.device = "cuda"
-
-args = Args()
-predictor = Predictor(args, verbose=False)
-specific_arguments = [predictor]
+model_weights_path = '/usr/users/vhassle/psych_track/AgeSelf/models/age_classification_model_20_focal_pad.pth'
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  
+model_age = torchvision.models.resnet50(weights=None)
+num_ftrs = model_age.fc.in_features
+model_age.fc = torch.nn.Linear(num_ftrs, 3)
+model_age.load_state_dict(torch.load(model_weights_path))
+model = model_age.to(device)
+model.eval()
+specific_arguments = [model]
 dataset = VideoDataset(video_path)
 
-dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_arguments, estimate_age_gender_MiVolo, age_gender_estimation=True)
+dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_arguments, estimate_age_gender_AgeSelf, age_gender_estimation=True)
+
+# # estimate_age_gender_MiVolo
+# # Initialize Predictor
+# class Args:
+#     def __init__(self):
+#         self.detector_weights = "/usr/users/vhassle/psych_track/MiVOLO/models/yolov8x_person_face.pt"
+#         self.checkpoint = "/usr/users/vhassle/psych_track/MiVOLO/models/mivolo_imbd.pth.tar"
+#         self.with_persons = True
+#         self.disable_faces = False
+#         self.draw = False
+#         self.device = "cuda"
+
+# args = Args()
+# predictor = Predictor(args, verbose=False)
+# specific_arguments = [predictor]
+# dataset = VideoDataset(video_path)
+
+# dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_arguments, estimate_age_gender_MiVolo, age_gender_estimation=False)
 
 # # estimate_age_gender_FairFace
 # cnn_face_detector = dlib.cnn_face_detection_model_v1('/usr/users/vhassle/psych_track/FairFace/dlib_models/mmod_human_face_detector.dat')
