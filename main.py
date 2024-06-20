@@ -111,7 +111,7 @@ def parse_option():
     #self created    manual_output_dir
     parser.add_argument("--manual-output-dir", type=str)
     parser.add_argument("--seq-path", type=str)
-    parser.add_argument("--view", type=str)
+    parser.add_argument("--view", type=str) #top, coming_in, going_out
 
     return parser.parse_args()
 

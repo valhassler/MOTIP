@@ -32,13 +32,15 @@ from torch.utils.data import Dataset
 
 
 class SeqDataset(Dataset):
-    def __init__(self, seq_dir: str, dataset: str, height: int = 800, width: int = 1333, view: str = 'non_specifc_view'):
+    def __init__(self, seq_dir: str, dataset: str, height: int = 800, width: int = 1333, view: str = 'non_specifc_view', x_th_frame: int = 1):
         """
         Args:
             seq_dir:
             dataset: DanceTrack or MOT17 or et al.
         """
         print(f'Loading video from view: {view}')
+        if view in ['top', 'coming_in','going_out']:
+            x_th_frame = 100
         video_path = seq_dir
         self.vr = decord.VideoReader(video_path, ctx=decord.cpu(0)) 
         image_shape = self.vr[0].shape
@@ -46,7 +48,8 @@ class SeqDataset(Dataset):
         self.image_width = image_shape[1]
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
-        self.length = len(self.vr)
+        self.x_th_frame = x_th_frame
+        self.length = int(len(self.vr)//x_th_frame)
         self.view = view
     
     def split_frame(self, entire_image):
@@ -69,7 +72,7 @@ class SeqDataset(Dataset):
         return image, ori_image
 
     def __getitem__(self, idx):
-        frame = self.vr[idx].asnumpy()
+        frame = self.vr[int(idx*self.x_th_frame)].asnumpy()
         if self.view in ['top', 'coming_in','going_out']: #when one wants to split here he has to work 
             splits = self.split_frame(frame)
             if self.view == 'top':

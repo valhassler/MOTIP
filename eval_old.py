@@ -11,21 +11,30 @@ from torch.utils.data import Dataset
 import torchvision
 
 import dlib
-from eval_functions import estimate_age_gender_MiVolo, estimate_age_gender_FairFace, estimate_age_gender_AgeSelf
+from psych_track.MOTIP.eval_functions_old import estimate_age_gender_MiVolo, estimate_age_gender_FairFace, estimate_age_gender_AgeSelf, AgeGenderResNet
 from mivolo.predictor import Predictor
+import time
 os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH")
 
 
 
+
 class VideoDataset(Dataset):
-    def __init__(self, video_path):
+    def __init__(self, video_path, view="none"):
         """
         Args: video_path (str): Path to the video file
         """
         # Initialize the VideoReader
         self.vr = decord.VideoReader(video_path, ctx=decord.cpu(0))  # Load video in CPU memory
-        self.length = len(self.vr)  # Total number of frames
-        self.video_size = self.vr[0].asnumpy().shape
+        self.view= view
+        if view in ['top', 'coming_in','going_out']:
+            self.x_th_frame = 100
+        else:
+            self.x_th_frame = 1
+        self.length = int(len(self.vr)/self.x_th_frame)  # Total number of frames
+        self.video_size = self.get_view(self.vr[0].asnumpy(), view = self.view).shape
+        
+        print(f"Video len: {self.length}")
     
     def load_annotations(self, annotation_path):
         annotations = {}
@@ -39,12 +48,18 @@ class VideoDataset(Dataset):
                 annotations[frame_idx].append(annotation)
         return annotations
     
-    def split_frame(self, np_array):
+    def get_view(self, np_array, view="all"):
         entire_image = np_array
-        top_view = entire_image[0:540, 62:892]  # Crop from top view
-        coming_in_view = entire_image[540:1500, 0:540]  # Crop from left side
-        going_out_view = entire_image[540:1500, 540:1080]  # Crop from right side
-        return top_view, coming_in_view, going_out_view
+        if view == 'top':
+            image = entire_image[0:540, 62:892]  # Crop from top view
+        elif view == 'coming_in':
+            image = entire_image[540:1500, 0:540]
+        elif view == 'going_out':
+            image = entire_image[540:1500, 540:1080]
+        else:
+            image = entire_image
+        return image
+
 
     def draw_annotations(self, frame, annotations, frame_number):
         """
@@ -53,23 +68,39 @@ class VideoDataset(Dataset):
         """
         cv2.putText(frame, f"{frame_number}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
         for annotation in annotations:
-            obj_id, x, y, w, h, gender, age = int(annotation[0]), annotation[1], annotation[2], annotation[3], annotation[4], annotation[-2], annotation[-1]
+            obj_id, x, y, w, h,confidence, gender, age = int(annotation[0]), annotation[1], annotation[2], annotation[3], annotation[4],annotation[5], annotation[-2], annotation[-1]
             top_left = (int(x), int(y))
             bottom_right = (int(x + w), int(y + h))
             gender = gender if gender !=-1 else None
             age = age if age !=-1 else None
+            if confidence < 0.5:
+                continue
             cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
+            cv2.putText(frame, f'conf: {round(confidence, 2)}', (int(x), int(y +20)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 2)
             cv2.putText(frame, f'ID: {obj_id}', (int(x), int(y - 35)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 2)
             cv2.putText(frame, f'Age: {age}', (int(x), int(y - 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 2)
             cv2.putText(frame, f'Gender: {gender}', (int(x), int(y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 2)
         return frame
-    
-    def save_annotated_video(self, output_path, annotation_path, view, predictor_age_gender,age_gender_est_func, age_gender_estimation=True):
+    def attempt_execution(self, vr, idx, retries=100, delay=0.1):
+        for attempt in range(retries):
+            try:
+                #frame = vr[idx].asnumpy()
+                frame = self.__getitem__(idx)
+                #print(f"Attempt {attempt + 1}: Success")
+                # You can return or process the frame if needed
+                return frame
+            except Exception as e:
+                print(f"Attempt {attempt + 1}: Failed with error {e}")
+                vr[0].asnumpy()
+                time.sleep(delay)  # Wait for the specified delay before retrying
+
+        print("All attempts failed.")
+        return "frame_failed"
+    def save_annotated_video(self, output_path, annotation_path, predictor_age_gender,age_gender_est_func, age_gender_estimation=False):
         """
         ## Args:
         - output_path (str): Path to save the annotated video
         - annotation_path (str): Path to the annotation file
-        - view (str): One of 'top', 'coming_in', or 'going_out'
         - age_gender_est_func: function that uses image, annotations and predictor, estimates age and gender
         and puts it in the annotations to the bounding box as additional information
         - predictor:  Initilized model for the age and gender prediciton
@@ -79,38 +110,22 @@ class VideoDataset(Dataset):
         os.makedirs(age_gender_basepath, exist_ok=True)
         annotation_with_age_gender_path = os.path.join(age_gender_basepath,os.path.basename(annotation_path).split(".")[0] + "_age_gender.txt")
         
-        if view == 'top':
-            width, height = 830, 540
-        elif view == 'coming_in':
-            width, height = 540, 960
-        elif view == 'going_out':
-            width, height = 540, 960
-        else:
-            #raise ValueError("View must be one of 'top', 'coming_in', or 'going_out'")
-            view = "entire"
-            height, width = self.video_size[0], self.video_size[1]
+        height, width = self.video_size[0], self.video_size[1]
         
         fps = 30
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         
-        for idx in trange(self.length):
-            frame = self.vr[idx].asnumpy()
-            if view != 'entire':
-                top_view, coming_in_view, going_out_view = self.split_frame(frame)
-                if view == 'top':
-                    selected_view = top_view
-                elif view == 'coming_in':
-                    selected_view = coming_in_view
-                elif view == 'going_out':
-                    selected_view = going_out_view
-            else:
-                selected_view = frame
+        for idx in tqdm(range(self.length)):
+            frame = self.attempt_execution(self.vr, idx, retries=3, delay=0.05)
+            if  isinstance(frame, str):
+                continue
+            selected_view = frame
                 
             frame_annotations = annotations.get(idx, [])
             if idx < 150000 and age_gender_estimation:
-                age_gender_est_func(selected_view, frame_annotations, predictor_age_gender)
+                age_gender_est_func(selected_view, frame_annotations, predictor_age_gender) #frame annotations are appended in this function, and also the frame is annotated
             annotated_frame = self.draw_annotations(selected_view, frame_annotations, idx)
             out.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
             if age_gender_estimation is not True:
@@ -127,9 +142,10 @@ class VideoDataset(Dataset):
         out.release()
 
     def __getitem__(self, idx):
-        frame = self.vr[idx].asnumpy()
-        top_view, coming_in_view, going_out_view = self.split_frame(frame)
-        return top_view, coming_in_view, going_out_view, frame
+        frame = self.vr[idx*self.x_th_frame]
+        frame = frame.asnumpy()
+        frame = self.get_view(frame, view=self.view)
+        return frame
 
     def __len__(self):
         return self.length
@@ -140,28 +156,39 @@ class VideoDataset(Dataset):
 
 
 #video_name = "2024_05_04_10_57_26"
-video_name = "2024_05_19_10_51_24"
+#video_name = "2024_05_19_10_51_24"
+# video_name = "2024_05_04_14_31_45"
 
-video_path = f"/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/{video_name.replace('_','-')}/{video_name}.mp4"
-annotation_path = f"/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/tracker/{video_name}.mp4.txt"
+# video_path = f"/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/{video_name.replace('_','-')}/{video_name}.mp4"
 
-output_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/{os.path.basename(annotation_path).split(".")[0]}_AgeSelf_pad.mp4'#_MiVOLO.mp4'
+
+# annotation_path = f"/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/detector/{video_name}.mp4.txt"
+# #annotation_path = f"/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/tracker/{video_name}.mp4.txt"
+
+
+#top view 
+view = "top"
+annotation_path = "/usr/users/vhassle/psych_track/MOTIP/outputs/Wortschatzinsel/Neon_test/detector/2024-05-04 12-42-04.mkv.txt"
+video_path = "/usr/users/vhassle/datasets/Wortschatzinsel/2024-05-04 12-42-04.mkv"
+
+output_path = f'/usr/users/vhassle/psych_track/MOTIP/outputs/{os.path.basename(annotation_path).split(".")[0]}_Top_a_g.mp4'#_MiVOLO.mp4'
 
 
 # estimate_age_gender_MiVolo
 # Initialize Predictor
-model_weights_path = '/usr/users/vhassle/psych_track/AgeSelf/models/age_classification_model_20_focal_pad.pth'
+model_weights_path = '/usr/users/vhassle/psych_track/AgeSelf/models/body_a_g_1_0.02/body_a_g_classification_model_final.pth'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')  
-model_age = torchvision.models.resnet50(weights=None)
-num_ftrs = model_age.fc.in_features
-model_age.fc = torch.nn.Linear(num_ftrs, 3)
-model_age.load_state_dict(torch.load(model_weights_path))
-model = model_age.to(device)
-model.eval()
-specific_arguments = [model]
-dataset = VideoDataset(video_path)
+model_a_g = AgeGenderResNet()
+model_a_g.load_state_dict(torch.load(model_weights_path))
+model_a_g = model_a_g.to(device)
+model_a_g.eval()
 
-dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_arguments, estimate_age_gender_AgeSelf, age_gender_estimation=True)
+
+specific_arguments = [model_a_g]
+dataset = VideoDataset(video_path, view=view)
+dataset.save_annotated_video(output_path, annotation_path, specific_arguments, estimate_age_gender_AgeSelf, age_gender_estimation=True)
+
+
 
 # # estimate_age_gender_MiVolo
 # # Initialize Predictor
@@ -180,6 +207,9 @@ dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_a
 # dataset = VideoDataset(video_path)
 
 # dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_arguments, estimate_age_gender_MiVolo, age_gender_estimation=False)
+
+
+
 
 # # estimate_age_gender_FairFace
 # cnn_face_detector = dlib.cnn_face_detection_model_v1('/usr/users/vhassle/psych_track/FairFace/dlib_models/mmod_human_face_detector.dat')
@@ -201,9 +231,8 @@ dataset.save_annotated_video(output_path, annotation_path, "quatsch", specific_a
 # model_fair_7 = model_fair_7.to(device)
 # model_fair_7.eval()
 
-
 # specific_arguments = [cnn_face_detector, sp, model_fair_7, trans, device]
-
 # dataset = VideoDataset(video_path)
+
 # dataset.save_annotated_video(output_path, annotation_path, "non_specific_view", specific_arguments, estimate_age_gender_FairFace, age_gender_estimation=True)
 

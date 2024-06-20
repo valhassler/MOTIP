@@ -72,6 +72,9 @@ def submit(config: dict, logger: Logger):
     return
 
 
+JUST_DETECTION = True
+
+
 @torch.no_grad()
 def submit_one_epoch(config: dict, model: nn.Module,
                      logger: Logger, dataset: str, data_split: str,
@@ -82,12 +85,15 @@ def submit_one_epoch(config: dict, model: nn.Module,
     # seq_names = [all_seq_names[_] for _ in range(len(all_seq_names))
     #              if _ % distributed_world_size() == distributed_rank()]
     #seq_names = [config["SEQ_PATH"]]#edited!!! now always just one automatic sequence no  matter what the real input would be
-    seq_names = glob.glob("/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/*/2024*.mp4")
+    # seq_names = glob.glob("/usr/users/vhassle/datasets/Wortschatzinsel/Neon_complete/Neon/*/2024*.mp4")
+    seq_names = ["/usr/users/vhassle/datasets/Wortschatzinsel/2024-05-04 12-42-04.mkv"]
+
+
     print(len(seq_names))   
 
 
     if len(seq_names) > 0:
-        for seq in seq_names[0:10]:
+        for seq in seq_names:
             submit_one_seq(
                 model=model, dataset=dataset,
                 seq_dir= seq, #os.path.join(config["DATA_ROOT"], dataset, data_split, seq),
@@ -97,6 +103,7 @@ def submit_one_epoch(config: dict, model: nn.Module,
                 newborn_thresh=config["DET_THRESH"] if "NEWBORN_THRESH" not in config else config["NEWBORN_THRESH"],
                 area_thresh=config["AREA_THRESH"], id_thresh=config["ID_THRESH"],
                 image_max_size=config["INFERENCE_MAX_SIZE"] if "INFERENCE_MAX_SIZE" in config else 1333,
+                fake_submit=config["VIEW"],
             )
     if is_distributed():
         torch.distributed.barrier()
@@ -114,7 +121,7 @@ def submit_one_seq(
             view: str = "no_specific_view",
         ):
     os.makedirs(os.path.join(outputs_dir, "tracker"), exist_ok=True)
-    seq_dataset = SeqDataset(seq_dir=seq_dir, dataset=dataset, width=image_max_size, view = view)
+    seq_dataset = SeqDataset(seq_dir=seq_dir, dataset=dataset, width=image_max_size, view = view) #carefull can switch to e.g. top to get some changes, but may be a bit stupid :D
 
     seq_dataloader = DataLoader(seq_dataset, batch_size=1, num_workers=0, shuffle=False)
     # seq_name = seq_dir.split("/")[-1]
@@ -141,21 +148,41 @@ def submit_one_seq(
         detr_outputs = model(frames=frame)
         detr_logits = detr_outputs["pred_logits"]
         detr_scores = torch.max(detr_logits, dim=-1).values.sigmoid()
+
         detr_det_idxs = detr_scores > det_thresh        # filter by the detection threshold
+        detr_det_scores = detr_scores[detr_det_idxs]
         detr_det_logits = detr_logits[detr_det_idxs]
         detr_det_labels = torch.max(detr_det_logits, dim=-1).indices
         detr_det_boxes = detr_outputs["pred_boxes"][detr_det_idxs]
+
+
         detr_det_outputs = detr_outputs["outputs"][detr_det_idxs]   # detr output embeddings
         area_legal_idxs = (detr_det_boxes[:, 2] * ori_w * detr_det_boxes[:, 3] * ori_h) > area_thresh   # filter by area
         detr_det_outputs = detr_det_outputs[area_legal_idxs]
         detr_det_boxes = detr_det_boxes[area_legal_idxs]
         detr_det_logits = detr_det_logits[area_legal_idxs]
         detr_det_labels = detr_det_labels[area_legal_idxs]
+        detr_det_scores = detr_det_scores[area_legal_idxs]
 
         # De-normalize to target image size:
         box_results = detr_det_boxes.cpu() * torch.tensor([ori_w, ori_h, ori_w, ori_h])
         box_results = box_cxcywh_to_xyxy(boxes=box_results)
 
+        # Write out all detections if I just need the detections:
+        if i == 0:
+            os.makedirs(os.path.join(outputs_dir, "detector"), exist_ok=True)
+            with open(os.path.join(outputs_dir, "detector", f"{seq_name}.txt"), "w") as file:
+                file.write("")
+        with open(os.path.join(outputs_dir, "detector", f"{seq_name}.txt"), "a") as file:
+            for obj_id, (conf, box) in enumerate(zip(detr_det_scores,box_results)):
+                x1, y1, x2, y2 = box.tolist()
+                result_line = f"{i + 1}," \
+                                f"1000," \
+                                f"{x1},{y1},{x2 - x1},{y2 - y1},{conf},-1,-1,-1\n"
+                file.write(result_line)
+
+        if JUST_DETECTION:
+            continue
         if only_detr is False:
             if len(box_results) > get_model(model).num_id_vocabulary:
                 print(f"[Carefully!] we only support {get_model(model).num_id_vocabulary} ids, "

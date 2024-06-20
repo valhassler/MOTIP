@@ -134,8 +134,6 @@ def estimate_age_gender_MiVolo(image, annotations, specific_arguments):
             annotation.append(np.mean(detected_objects.ages))  # Age
 #AgeSelf
 import torchvision.transforms as transforms
-from PIL import Image
-import torch.nn as nn
 import torch
 class ResizeToMaxDim:
     def __init__(self, max_size):
@@ -172,49 +170,66 @@ class PadToSquare:
         padded_img = np.pad(img, padding, mode='constant', constant_values=self.fill)
         return padded_img
 
-transform = transforms.Compose([
-            ResizeToMaxDim(448),
-            PadToSquare(448),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+# image_size = 150
+# transform_val = transforms.Compose([
+#     ResizeToMaxDim(image_size),
+#     PadToSquare(image_size),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+# ])
 
+
+import torch.nn as nn
+import torchvision
+class AgeGenderResNet(nn.Module):
+    def __init__(self, num_age_classes=3, num_gender_classes=2):
+        super(AgeGenderResNet, self).__init__()
+        self.resnet = torchvision.models.resnet50(pretrained=True)
+        num_ftrs = self.resnet.fc.in_features
+        self.resnet.fc = nn.Identity()
+        self.age_fc = nn.Linear(num_ftrs, num_age_classes)
+        self.gender_fc = nn.Linear(num_ftrs, num_gender_classes)
+
+    def forward(self, x):
+        x = self.resnet(x)
+        age_out = self.age_fc(x)
+        gender_out = self.gender_fc(x)
+        return age_out, gender_out
 
 def estimate_age_gender_AgeSelf(image, annotations, specific_arguments):
     model = specific_arguments[0]
     for annotation in annotations:
         cropped_image = crop_image(image, annotation)
-        if cropped_image.shape[0]*cropped_image.shape[1] < MINIMAL_SIZE: #20000 for going_out, 200 for top
-            continue
+        # if cropped_image.shape[0]*cropped_image.shape[1] < MINIMAL_SIZE: #20000 for going_out, 200 for top
+        #     continue
 
 
         # Define transformation
-        # transform = transforms.Compose([
-        #     transforms.Resize(448),
-        #     transforms.ToTensor(),
-        #     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        # ])
+        image_size = 150
         transform = transforms.Compose([
-                ResizeToMaxDim(448),
-                PadToSquare(448),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+            ResizeToMaxDim(image_size),
+            PadToSquare(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
 
         # Load and preprocess the image
-        input_image_before_cuda = transform(image)
+        input_image_before_cuda = transform(cropped_image)
         input_image = input_image_before_cuda.unsqueeze(0).to('cuda')
         # Make prediction
         with torch.no_grad():
             output = model(input_image)
-            #predicted_age = output
-            predicted_age_group = np.argmax(output.cpu().numpy())
-        age_group_mapping = {
-            0: '0-2',
-            1: '3-13',
-            2: '18-99',
-        }
-        predicted_age_group = age_group_mapping.get(predicted_age_group, 'Unknown')
+            predicted_age_group, predict_gender = np.argmax(output[0].cpu().numpy()), np.argmax(output[1].cpu().numpy())
+        # age_group_mapping = {
+        #     0: '0-2',
+        #     1: '3-13',
+        #     2: '18-99',
+        # }
+        # predicted_age_group = age_group_mapping.get(predicted_age_group, 'Unknown')
+        predicted_age_group = predicted_age_group
+        predict_gender_final = "f" if predict_gender == 0 else "m" 
 
-        annotation.append(None)  # Gender
+
+
+        annotation.append(predict_gender)  # Gender
         annotation.append(predicted_age_group)  # Age
